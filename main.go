@@ -16,7 +16,7 @@ func main() {
 		url = os.Args[1]
 	}
 
-	res := make(chan Result)
+	res := make(chan Result, 10)
 	mng := Manager{
 		MaxThread: 10,
 		URL:       url,

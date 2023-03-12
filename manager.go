@@ -97,6 +97,7 @@ func (mng *Manager) Run() {
 		brk := false
 		switch res.code {
 		case Abort:
+			failCnt++
 			mng.sitrep("Thread failed: ", res.msg, " Running threads: ", mng.runCnt)
 
 			if failCnt > maxFail {
@@ -106,10 +107,12 @@ func (mng *Manager) Run() {
 				}
 				continue
 			}
-			mng.allocThread()
+			cnt := mng.allocThread()
+			mng.sitrep("Allocated %d new threads, %d threads running. ", cnt, mng.runCnt)
 		case Success:
 			mng.sitrep("1 thread just finished downloading. ")
-			mng.allocThread()
+			cnt := mng.allocThread()
+			mng.sitrep("Allocated %d new threads, %d threads running. ", cnt, mng.runCnt)
 			if mng.runCnt == 0 {
 				mng.sitrep("All threads finished downloading. ")
 				brk = true
@@ -118,11 +121,6 @@ func (mng *Manager) Run() {
 		if brk { break }
 	}
 
-	// wd, err := os.Getwd()
-	// if err != nil {
-	// 	mng.abort("Unable to get working directory. Reason: ", err.Error())
-	// 	return
-	// }
 	file, err := os.OpenFile(mng.fileName, os.O_CREATE | os.O_RDWR, 0755)
 	if err != nil {
 		mng.abort("Error creating file. Reason: ", err)
@@ -173,20 +171,20 @@ func (mng *Manager) Run() {
 // 	return true
 // }
 
-func (mng *Manager) allocThread() {
+func (mng *Manager) allocThread() int {
 	cnt := 0
 	mng.mux.Lock()
 	defer mng.mux.Unlock()
 	if mng.list.Empty() {
 		mng.newThread(0, mng.totSize-1)
 		cnt++
-		return
+		return cnt
 	}
 	p := mng.list.Front()
 	if p.Content().begin != 0 {
 		mng.newThread(0, p.Content().begin-1)
 		cnt++
-		return
+		return cnt
 	}
 
 	for ; p != nil; p = p.Next() {
@@ -195,42 +193,40 @@ func (mng *Manager) allocThread() {
 		case Success:
 			fallthrough
 		case Abort:
-			if p.next != nil {
+			if p.Next() != nil {
 				nextBegin := p.Next().Content().begin
 				if th.end+1 != nextBegin {
 					mng.newThread(th.end+1, nextBegin-1)
 					cnt++
-					return
+					return cnt
 				} else {
 					continue
 				}
 			} else if th.end+1 != mng.totSize {
 				mng.newThread(th.end+1, mng.totSize-1)
 				cnt++
-				return
-			} else {
-				return
+				return cnt
 			}
 		case Running:
 			assigned := th.end - th.begin + 1
-			if float64(assigned - th.totWrite)/float64(mng.totSize) > 0.05 {
-				begin := th.begin + int(float64(th.totWrite)*1.1)
-				th.mux.Lock()
+			toDl := assigned - th.totWrite
+			th.mux.Lock()
+			defer th.mux.Unlock()
+			if float64(toDl)/float64(mng.totSize) > 0.05 && toDl >= 1024 {
+				begin := th.begin + th.totWrite + int(float64(toDl)*0.5)
 				th.end = begin - 1
-				th.mux.Unlock()
 				var end int
 				if p.next != nil {
-					end = p.next.Content().begin
+					end = p.next.Content().begin-1
 				} else {
 					end = mng.totSize - 1
 				}
 				mng.newThread(begin, end)
 				cnt++
-			} else {
-				continue
 			}
 		}
 	}
+	return cnt
 }
 
 func (mng *Manager) sitrep(args ...any) {
@@ -273,6 +269,8 @@ func (mng *Manager) success(args ...any) {
 }
 
 func (mng *Manager) initDownload() {
+	mng.mux.Lock()
+	defer mng.mux.Unlock()
 	step := int(mng.totSize / mng.MaxThread) + 1
 	if step < 1 {
 		step = 1
@@ -301,7 +299,6 @@ func (mng *Manager) newThread(begin int, end int) *thread {
 		stat:   Result{code: Running, msg: ""},
 		client: &http.Client{},
 	}
-	mng.mux.Lock()
 	if mng.list.Empty() {
 		mng.list.Append(&th)
 		th.node = mng.list.tail
@@ -319,7 +316,6 @@ func (mng *Manager) newThread(begin int, end int) *thread {
 		}
 	}
 	mng.runCnt++
-	mng.mux.Unlock()
 	go th.run()
 	return &th
 }

@@ -161,7 +161,7 @@ func (list *List[T]) DelNode(p *Node[T]) bool {
 	return true
 }
 
-func (list List[T]) Append(e T) {
+func (list *List[T]) Append(e T) {
 	if list.head == nil {
 		list.head = &Node[T]{
 			content: e,
@@ -178,10 +178,10 @@ func (list List[T]) Append(e T) {
 	list.tail = p.next
 }
 
-func (list List[T]) Empty() bool {
+func (list *List[T]) Empty() bool {
 	return list.head == nil
 }
 
-func (list List[T]) Front() *Node[T] {
+func (list *List[T]) Front() *Node[T] {
 	return list.head
 }
